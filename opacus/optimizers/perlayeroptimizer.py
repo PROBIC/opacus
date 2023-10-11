@@ -39,6 +39,7 @@ class DPPerLayerOptimizer(DPOptimizer):
         loss_reduction: str = "mean",
         generator=None,
         secure_mode: bool = False,
+        normalize_clipping: bool = False,
     ):
         assert len(max_grad_norm) == len(params(optimizer))
         self.max_grad_norms = max_grad_norm
@@ -51,6 +52,7 @@ class DPPerLayerOptimizer(DPOptimizer):
             loss_reduction=loss_reduction,
             generator=generator,
             secure_mode=secure_mode,
+            normalize_clipping=normalize_clipping,
         )
 
     def clip_and_accumulate(self):
@@ -65,6 +67,9 @@ class DPPerLayerOptimizer(DPOptimizer):
                 max=1.0
             )
             grad = torch.einsum("i,i...", per_sample_clip_factor, grad_sample)
+
+            if self.normalize_clipping:
+                grad /= max_grad_norm
 
             if p.summed_grad is not None:
                 p.summed_grad += grad

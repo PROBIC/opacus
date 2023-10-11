@@ -26,11 +26,17 @@ from .optimizer import DPOptimizer, _generate_noise
 from .perlayeroptimizer import DPPerLayerOptimizer
 
 
-def _clip_and_accumulate_parameter(p: nn.Parameter, max_grad_norm: float):
+def _clip_and_accumulate_parameter(
+    p: nn.Parameter, max_grad_norm: float, normalize_clipping: bool
+):
     per_sample_norms = p.grad_sample.view(len(p.grad_sample), -1).norm(2, dim=-1)
     per_sample_clip_factor = (max_grad_norm / (per_sample_norms + 1e-6)).clamp(max=1.0)
 
     grad = torch.einsum("i,i...", per_sample_clip_factor, p.grad_sample)
+
+    if normalize_clipping:
+        grad /= max_grad_norm
+
     if p.summed_grad is not None:
         p.summed_grad += grad
     else:
@@ -48,6 +54,7 @@ class SimpleDistributedPerLayerOptimizer(DPPerLayerOptimizer, DistributedDPOptim
         loss_reduction: str = "mean",
         generator=None,
         secure_mode: bool = False,
+        normalize_clipping: bool = False,
     ):
         self.rank = torch.distributed.get_rank()
         self.world_size = torch.distributed.get_world_size()
@@ -60,6 +67,7 @@ class SimpleDistributedPerLayerOptimizer(DPPerLayerOptimizer, DistributedDPOptim
             loss_reduction=loss_reduction,
             generator=generator,
             secure_mode=secure_mode,
+            normalize_clipping=normalize_clipping,
         )
 
 
@@ -79,6 +87,7 @@ class DistributedPerLayerOptimizer(DPOptimizer):
         loss_reduction: str = "mean",
         generator=None,
         secure_mode: bool = False,
+        normalize_clipping: bool = False,
     ):
         self.rank = torch.distributed.get_rank()
         self.world_size = torch.distributed.get_world_size()
@@ -92,6 +101,7 @@ class DistributedPerLayerOptimizer(DPOptimizer):
             loss_reduction=loss_reduction,
             generator=generator,
             secure_mode=secure_mode,
+            normalize_clipping=normalize_clipping,
         )
         self._register_hooks()
 
@@ -99,8 +109,11 @@ class DistributedPerLayerOptimizer(DPOptimizer):
         """
         The reason why we need self is because of generator for secure_mode
         """
+
+        max_grad_norm = 1 if self.normalize_cliping else self.max_grad_norm
+
         noise = _generate_noise(
-            std=self.noise_multiplier * self.max_grad_norm,
+            std=self.noise_multiplier * max_grad_norm,
             reference=p.summed_grad,
             generator=None,
             secure_mode=self.secure_mode,
@@ -145,9 +158,13 @@ class DistributedPerLayerOptimizer(DPOptimizer):
         return True
 
     def _ddp_per_layer_hook(
-        self, p: nn.Parameter, max_grad_norm: float, _: torch.Tensor
+        self,
+        p: nn.Parameter,
+        max_grad_norm: float,
+        normalize_clipping: bool,
+        _: torch.Tensor,
     ):
-        _clip_and_accumulate_parameter(p, max_grad_norm)
+        _clip_and_accumulate_parameter(p, max_grad_norm, normalize_clipping)
         # Equivalent ot _check_skip_next_step but without popping because it has to be done for every parameter p
         if self._check_skip_next_step(pop_next=False):
             return
@@ -169,5 +186,12 @@ class DistributedPerLayerOptimizer(DPOptimizer):
                 p.ddp_hooks = []
 
             p.ddp_hooks.append(
-                p.register_hook(partial(self._ddp_per_layer_hook, p, max_grad_norm))
+                p.register_hook(
+                    partial(
+                        self._ddp_per_layer_hook,
+                        p,
+                        max_grad_norm,
+                        self.normalize_clipping,
+                    )
+                )
             )

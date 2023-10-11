@@ -110,6 +110,7 @@ class BasePrivacyEngineTest(ABC):
         clipping: str = "flat",
         grad_sample_mode="hooks",
         opt_exclude_frozen=False,
+        normalize_clipping=False,
     ):
         model = self._init_model()
         model = PrivacyEngine.get_compatible_module(model)
@@ -143,6 +144,7 @@ class BasePrivacyEngineTest(ABC):
             poisson_sampling=poisson_sampling,
             clipping=clipping,
             grad_sample_mode=grad_sample_mode,
+            normalize_clipping=normalize_clipping,
         )
 
         return model, optimizer, poisson_dl, privacy_engine
@@ -348,6 +350,39 @@ class BasePrivacyEngineTest(ABC):
                 min(non_clipped_norm, max_grad_norm_per_layer), clipped_norm, places=3
             )
 
+    def test_flat_clipping_with_normalize(self):
+        # FIXME
+        torch.set_printoptions(sci_mode=False, precision=6)
+
+        self.BATCH_SIZE = 1
+        max_grad_norm = 0.5
+
+        torch.manual_seed(1337)
+        model, optimizer, dl, _ = self._init_private_training(
+            noise_multiplier=0.0,
+            max_grad_norm=max_grad_norm,
+            clipping="flat",
+            poisson_sampling=False,
+            grad_sample_mode=self.GRAD_SAMPLE_MODE,
+            normalize_clipping=True,
+        )
+        self._train_steps(model, optimizer, dl, max_steps=1)
+        clipped_grads = torch.cat(
+            [p.summed_grad.reshape(-1) for p in model.parameters() if p.requires_grad]
+        )
+
+        torch.manual_seed(1337)
+        model, optimizer, dl = self._init_vanilla_training()
+        self._train_steps(model, optimizer, dl, max_steps=1)
+        non_clipped_grads = torch.cat(
+            [p.grad.reshape(-1) for p in model.parameters() if p.requires_grad]
+        )
+
+        self.assertAlmostEqual(
+            clipped_grads.norm().item() * max_grad_norm, max_grad_norm, places=3
+        )
+        self.assertGreater(non_clipped_grads.norm(), clipped_grads.norm())
+
     def test_sample_grad_aggregation(self) -> None:
         """
         Check if final gradient is indeed an aggregation over per-sample gradients
@@ -371,6 +406,41 @@ class BasePrivacyEngineTest(ABC):
                 f"Param: {p_name}",
             )
 
+    def test_per_layer_clipping_with_normalize(self):
+        self.BATCH_SIZE = 1
+        max_grad_norm_per_layer = 1.0
+
+        torch.manual_seed(1337)
+        p_model, p_optimizer, p_dl, _ = self._init_private_training(
+            noise_multiplier=0.0,
+            max_grad_norm=max_grad_norm_per_layer,
+            clipping="per_layer",
+            poisson_sampling=False,
+            grad_sample_mode=self.GRAD_SAMPLE_MODE,
+            normalize_clipping=True,
+        )
+        p_optimizer.signal_skip_step()
+        self._train_steps(p_model, p_optimizer, p_dl, max_steps=1)
+
+        torch.manual_seed(1337)
+        v_model, v_optimizer, v_dl = self._init_vanilla_training()
+        self._train_steps(v_model, v_optimizer, v_dl, max_steps=1)
+
+        for p_p, v_p in zip(p_model.parameters(), v_model.parameters()):
+            if not p_p.requires_grad:
+                continue
+
+            non_clipped_norm = v_p.grad.norm().item()
+            clipped_norm = p_p.summed_grad.norm().item()
+
+            self.assertAlmostEqual(
+                min(
+                    non_clipped_norm * max_grad_norm_per_layer, max_grad_norm_per_layer
+                ),
+                clipped_norm,
+                places=3,
+            )
+
     def test_noise_changes_every_time(self) -> None:
         """
         Test that adding noise results in ever different model params.
@@ -391,6 +461,32 @@ class BasePrivacyEngineTest(ABC):
         for p0, p1 in zip(first_run_params, second_run_params):
             self.assertFalse(torch.allclose(p0, p1))
 
+    def test_sample_grad_aggregation_with_normalize(self):
+        """
+        Check if final gradient is indeed an aggregation over per-sample gradients
+        """
+        max_grad_norm = 99999.0
+        model, optimizer, dl, _ = self._init_private_training(
+            poisson_sampling=False,
+            noise_multiplier=0.0,
+            max_grad_norm=max_grad_norm,
+            grad_sample_mode=self.GRAD_SAMPLE_MODE,
+            normalize_clipping=True,
+        )
+        self._train_steps(model, optimizer, dl, max_steps=1)
+
+        for p_name, p in model.named_parameters():
+            if not p.requires_grad:
+                continue
+
+            summed_grad = p.grad_sample.sum(dim=0) / self.BATCH_SIZE / max_grad_norm
+            self.assertTrue(
+                torch.allclose(p.grad, summed_grad, atol=1e-8, rtol=1e-4),
+                f"Per sample gradients don't sum up to the final grad value."
+                f"Param: {p_name}",
+            )
+
+
     def test_get_compatible_module_inaction(self) -> None:
         needs_no_replacement_module = nn.Linear(1, 2)
         fixed_module = PrivacyEngine.get_compatible_module(needs_no_replacement_module)
@@ -400,6 +496,28 @@ class BasePrivacyEngineTest(ABC):
                 needs_no_replacement_module.state_dict(), fixed_module.state_dict()
             )
         )
+
+    def test_noise_changes_every_time_with_normalize(self):
+        """
+        Test that adding noise results in ever different model params.
+        We disable clipping in this test by setting it to a very high threshold.
+        """
+        model, optimizer, dl, _ = self._init_private_training(
+            poisson_sampling=False,
+            grad_sample_mode=self.GRAD_SAMPLE_MODE,
+            normalize_clipping=True,
+        )
+        self._train_steps(model, optimizer, dl, max_steps=1)
+        first_run_params = (p for p in model.parameters() if p.requires_grad)
+
+        model, optimizer, dl, _ = self._init_private_training(
+            poisson_sampling=False, grad_sample_mode=self.GRAD_SAMPLE_MODE
+        )
+        self._train_steps(model, optimizer, dl, max_steps=1)
+        second_run_params = (p for p in model.parameters() if p.requires_grad)
+
+        for p0, p1 in zip(first_run_params, second_run_params):
+            self.assertFalse(torch.allclose(p0, p1))
 
     def test_model_validator(self) -> None:
         """
@@ -662,6 +780,7 @@ class BasePrivacyEngineTest(ABC):
         noise_multiplier=st.floats(0.5, 5.0),
         max_steps=st.integers(8, 10),
         secure_mode=st.just(False),  # TODO: enable after fixing torchcsprng build
+        normalize_clipping=st.booleans(),
     )
     @settings(suppress_health_check=list(HealthCheck), deadline=None)
     def test_noise_level(
@@ -669,13 +788,17 @@ class BasePrivacyEngineTest(ABC):
         noise_multiplier: float,
         max_steps: int,
         secure_mode: bool,
+        normalize_clipping: bool,
     ):
         """
         Tests that the noise level is correctly set
         """
 
         def helper_test_noise_level(
-            noise_multiplier: float, max_steps: int, secure_mode: bool
+            noise_multiplier: float,
+            max_steps: int,
+            secure_mode: bool,
+            normalize_clipping: bool,
         ):
             torch.manual_seed(100)
             # Initialize models with parameters to zero
@@ -683,6 +806,7 @@ class BasePrivacyEngineTest(ABC):
                 noise_multiplier=noise_multiplier,
                 secure_mode=secure_mode,
                 grad_sample_mode=self.GRAD_SAMPLE_MODE,
+                normalize_clipping=normalize_clipping,
             )
             for p in model.parameters():
                 p.data.zero_()
@@ -721,6 +845,7 @@ class BasePrivacyEngineTest(ABC):
             noise_multiplier=noise_multiplier,
             max_steps=max_steps,
             secure_mode=secure_mode,
+            normalize_clipping=normalize_clipping,
         )
 
     @unittest.skip("requires torchcsprng compatible with new pytorch versions")

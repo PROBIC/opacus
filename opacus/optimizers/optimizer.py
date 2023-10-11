@@ -205,6 +205,7 @@ class DPOptimizer(Optimizer):
         loss_reduction: str = "mean",
         generator=None,
         secure_mode: bool = False,
+        normalize_clipping: bool = False,
     ):
         """
 
@@ -223,6 +224,10 @@ class DPOptimizer(Optimizer):
             secure_mode: if ``True`` uses noise generation approach robust to floating
                 point arithmetic attacks.
                 See :meth:`~opacus.optimizers.optimizer._generate_noise` for details
+            normalize_clipping: Decouples the learning rate and max_grad_norm by normalizing the
+                clipped gradients by 1/C as described in the paper "Unlocking High-Accuracy
+                Differentially Private Image Classification through Scale" by De et al. (2022)
+                - https://arxiv.org/pdf/2204.13650.pdf
         """
         if loss_reduction not in ("mean", "sum"):
             raise ValueError(f"Unexpected value for loss_reduction: {loss_reduction}")
@@ -240,6 +245,7 @@ class DPOptimizer(Optimizer):
         self.step_hook = None
         self.generator = generator
         self.secure_mode = secure_mode
+        self.normalize_clipping = normalize_clipping
         self._step_skip_queue = []
         self._is_last_step_skipped = False
 
@@ -451,6 +457,9 @@ class DPOptimizer(Optimizer):
             grad_sample = self._get_flat_grad_sample(p)
             grad = torch.einsum("i,i...", per_sample_clip_factor, grad_sample)
 
+            if self.normalize_clipping:
+                grad /= self.max_grad_norm
+
             if p.summed_grad is not None:
                 p.summed_grad += grad
             else:
@@ -463,11 +472,13 @@ class DPOptimizer(Optimizer):
         Adds noise to clipped gradients. Stores clipped and noised result in ``p.grad``
         """
 
+        max_grad_norm = 1 if self.normalize_clipping else self.max_grad_norm
+
         for p in self.params:
             _check_processed_flag(p.summed_grad)
 
             noise = _generate_noise(
-                std=self.noise_multiplier * self.max_grad_norm,
+                std=self.noise_multiplier * max_grad_norm,
                 reference=p.summed_grad,
                 generator=self.generator,
                 secure_mode=self.secure_mode,

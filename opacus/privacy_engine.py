@@ -110,6 +110,7 @@ class PrivacyEngine:
         clipping: str = "flat",
         noise_generator=None,
         grad_sample_mode="hooks",
+        normalize_clipping: bool = False,
         **kwargs,
     ) -> DPOptimizer:
         if isinstance(optimizer, DPOptimizer):
@@ -135,6 +136,7 @@ class PrivacyEngine:
             loss_reduction=loss_reduction,
             generator=generator,
             secure_mode=self.secure_mode,
+            normalize_clipping=normalize_clipping,
             **kwargs,
         )
 
@@ -286,6 +288,7 @@ class PrivacyEngine:
         clipping: str = "flat",
         noise_generator=None,
         grad_sample_mode: str = "hooks",
+        normalize_clipping: bool = False,
         **kwargs,
     ) -> Tuple[GradSampleModule, DPOptimizer, DataLoader]:
         """
@@ -335,6 +338,10 @@ class PrivacyEngine:
                 implementation class for the wrapped ``module``. See
                 :class:`~opacus.grad_sample.gsm_base.AbstractGradSampleModule` for more
                 details
+            normalize_clipping: Decouples the learning rate and max_grad_norm by normalizing the
+                clipped gradients by 1/C as described in the paper "Unlocking High-Accuracy
+                Differentially Private Image Classification through Scale" by De et al. (2022)
+                - https://arxiv.org/pdf/2204.13650.pdf
 
         Returns:
             Tuple of (model, optimizer, data_loader).
@@ -394,6 +401,7 @@ class PrivacyEngine:
             distributed=distributed,
             clipping=clipping,
             grad_sample_mode=grad_sample_mode,
+            normalize_clipping=normalize_clipping,
             **kwargs,
         )
 
@@ -419,6 +427,7 @@ class PrivacyEngine:
         clipping: str = "flat",
         noise_generator=None,
         grad_sample_mode: str = "hooks",
+        normalize_clipping: bool = False,
         **kwargs,
     ):
         """
@@ -502,6 +511,7 @@ class PrivacyEngine:
             grad_sample_mode=grad_sample_mode,
             poisson_sampling=poisson_sampling,
             clipping=clipping,
+            normalize_clipping=normalize_clipping,
             **kwargs,
         )
 
