@@ -144,6 +144,7 @@ class PrivacyEngine:
         *,
         poisson_sampling: bool,
         distributed: bool,
+        total_steps: int = None,
     ) -> DataLoader:
         if self.dataset is None:
             self.dataset = data_loader.dataset
@@ -159,7 +160,10 @@ class PrivacyEngine:
 
         if poisson_sampling:
             return DPDataLoader.from_data_loader(
-                data_loader, generator=self.secure_rng, distributed=distributed
+                data_loader,
+                generator=self.secure_rng,
+                distributed=distributed,
+                total_steps=total_steps,
             )
         elif self.secure_mode:
             return switch_generator(data_loader=data_loader, generator=self.secure_rng)
@@ -277,6 +281,7 @@ class PrivacyEngine:
         noise_generator=None,
         grad_sample_mode: str = "hooks",
         normalize_clipping: bool = False,
+        total_steps: int = None,
     ) -> Tuple[GradSampleModule, DPOptimizer, DataLoader]:
         """
         Add privacy-related responsibilities to the main PyTorch training objects:
@@ -329,6 +334,9 @@ class PrivacyEngine:
                 clipped gradients by 1/C as described in the paper "Unlocking High-Accuracy
                 Differentially Private Image Classification through Scale" by De et al. (2022)
                 - https://arxiv.org/pdf/2204.13650.pdf
+            total_steps: Instead of stepping through once the dataloader for once expected epoch,
+            we will step through it `total_steps` times. This will set the sample rate to
+            batch_size/data_size. The parameter total_steps is any positive integer.
 
         Returns:
             Tuple of (model, optimizer, data_loader).
@@ -365,11 +373,26 @@ class PrivacyEngine:
         if poisson_sampling:
             module.forbid_grad_accumulation()
 
+        # save batch size from original data loader
+        batch_size = data_loader.batch_size
+
         data_loader = self._prepare_data_loader(
-            data_loader, distributed=distributed, poisson_sampling=poisson_sampling
+            data_loader,
+            distributed=distributed,
+            poisson_sampling=poisson_sampling,
+            total_steps=total_steps,
         )
 
-        sample_rate = 1 / len(data_loader)
+        if total_steps:
+            if not poisson_sampling:
+                raise ValueError("Setting total_steps without Poisson sampling not implemented")
+
+            # if we are stepping through the optimizer for `total_steps` steps,
+            # we can just use sample_rate q = B/N
+            sample_rate = batch_size / len(data_loader.dataset)
+        else:
+            sample_rate = 1 / len(data_loader)
+
         expected_batch_size = int(len(data_loader.dataset) * sample_rate)
 
         # expected_batch_size is the *per worker* batch size
@@ -413,6 +436,7 @@ class PrivacyEngine:
         noise_generator=None,
         grad_sample_mode: str = "hooks",
         normalize_clipping: bool = False,
+        total_steps: int = None,
         **kwargs,
     ):
         """
@@ -456,6 +480,9 @@ class PrivacyEngine:
                 implementation class for the wrapped ``module``. See
                 :class:`~opacus.grad_sample.gsm_base.AbstractGradSampleModule` for more
                 details
+            total_steps: Instead of stepping through once the dataloader for once expected epoch,
+            we will step through it `total_steps` times. This will set the sample rate to
+            batch_size/data_size. The parameter total_steps is any positive integer.
 
         Returns:
             Tuple of (model, optimizer, data_loader).
@@ -468,7 +495,34 @@ class PrivacyEngine:
                 equivalent to the original data loader, possibly with updated
                 sampling mechanism. Points to the same dataset object.
         """
-        sample_rate = 1 / len(data_loader)
+
+        if total_steps:
+            if not poisson_sampling:
+                raise ValueError("Setting total_steps without Poisson sampling not implemented")
+
+            # we are given the number of optimizer steps instead of epochs,
+            # so we can just use sample rate q = B/N
+            sample_rate = data_loader.batch_size / len(data_loader.dataset)
+
+            noise_multiplier = get_noise_multiplier(
+                target_epsilon=target_epsilon,
+                target_delta=target_delta,
+                sample_rate=sample_rate,
+                steps=total_steps,
+                accountant=self.accountant.mechanism(),
+                **kwargs,
+            )
+        else:
+            sample_rate = 1 / len(data_loader)
+
+            noise_multiplier = get_noise_multiplier(
+                target_epsilon=target_epsilon,
+                target_delta=target_delta,
+                sample_rate=sample_rate,
+                epochs=epochs,
+                accountant=self.accountant.mechanism(),
+                **kwargs,
+            )
 
         if len(self.accountant) > 0:
             warnings.warn(
@@ -481,14 +535,7 @@ class PrivacyEngine:
             module=module,
             optimizer=optimizer,
             data_loader=data_loader,
-            noise_multiplier=get_noise_multiplier(
-                target_epsilon=target_epsilon,
-                target_delta=target_delta,
-                sample_rate=sample_rate,
-                epochs=epochs,
-                accountant=self.accountant.mechanism(),
-                **kwargs,
-            ),
+            noise_multiplier=noise_multiplier,
             max_grad_norm=max_grad_norm,
             batch_first=batch_first,
             loss_reduction=loss_reduction,
@@ -497,6 +544,7 @@ class PrivacyEngine:
             poisson_sampling=poisson_sampling,
             clipping=clipping,
             normalize_clipping=normalize_clipping,
+            total_steps=total_steps,
         )
 
     def get_epsilon(self, delta):
