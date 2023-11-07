@@ -500,6 +500,9 @@ class PrivacyEngine:
             if not poisson_sampling:
                 raise ValueError("Setting total_steps without Poisson sampling not implemented")
 
+            if epochs != 1:
+                raise ValueError("Epochs must be 1 when 'total_steps' is set")
+
             # we are given the number of optimizer steps instead of epochs,
             # so we can just use sample rate q = B/N
             sample_rate = data_loader.batch_size / len(data_loader.dataset)
