@@ -595,7 +595,6 @@ class BasePrivacyEngineTest(ABC):
         model, optimizer, dl = self._init_vanilla_training()
         target_eps = 2.0
         target_delta = 1e-5
-        epochs = 1
 
         privacy_engine = PrivacyEngine()
         model, optimizer, poisson_dl = privacy_engine.make_private_with_epsilon(
@@ -604,7 +603,7 @@ class BasePrivacyEngineTest(ABC):
             data_loader=dl,
             target_epsilon=target_eps,
             target_delta=1e-5,
-            epochs=epochs,
+            epochs=None, # epochs must be None if total_steps is set
             max_grad_norm=1.0,
             grad_sample_mode=self.GRAD_SAMPLE_MODE,
             total_steps=total_steps,
@@ -630,6 +629,21 @@ class BasePrivacyEngineTest(ABC):
         # restore the original values
         self.DATA_SIZE = orig_data_size
         self.BATCH_SIZE = orig_batch_size
+
+        with self.assertRaisesRegex(
+            ValueError, "EITHER a number of steps or a number of epochs"
+        ):
+            model, optimizer, poisson_dl = privacy_engine.make_private_with_epsilon(
+                module=model,
+                optimizer=optimizer,
+                data_loader=dl,
+                target_epsilon=target_eps,
+                target_delta=1e-5,
+                epochs=1,
+                max_grad_norm=1.0,
+                grad_sample_mode=self.GRAD_SAMPLE_MODE,
+                total_steps=100,
+            )
 
     def test_deterministic_run(self):
         """

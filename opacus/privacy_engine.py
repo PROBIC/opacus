@@ -500,8 +500,10 @@ class PrivacyEngine:
             if not poisson_sampling:
                 raise ValueError("Setting total_steps without Poisson sampling not implemented")
 
-            if epochs != 1:
-                raise ValueError("Epochs must be 1 when 'total_steps' is set")
+            if epochs is not None:
+                raise ValueError(
+                    "make_private_with_epsilon takes as input EITHER a number of steps or a number of epochs"
+                )
 
             # we are given the number of optimizer steps instead of epochs,
             # so we can just use sample rate q = B/N
