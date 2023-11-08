@@ -609,6 +609,8 @@ class BasePrivacyEngineTest(ABC):
             total_steps=total_steps,
         )
 
+        self.assertEqual(len(poisson_dl), total_steps)
+
         true_sample_rate = self.BATCH_SIZE / self.DATA_SIZE
 
         # we can check from the accounting history if the sample rate
@@ -630,6 +632,7 @@ class BasePrivacyEngineTest(ABC):
         self.DATA_SIZE = orig_data_size
         self.BATCH_SIZE = orig_batch_size
 
+        # check that error is thrown when both epochs and total_steps are set
         with self.assertRaisesRegex(
             ValueError, "EITHER a number of steps or a number of epochs"
         ):
