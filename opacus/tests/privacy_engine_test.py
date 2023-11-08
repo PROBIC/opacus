@@ -583,7 +583,9 @@ class BasePrivacyEngineTest(ABC):
         data_size=st.sampled_from([50, 51]),
     )
     @settings(deadline=None)
-    def test_make_private_with_epsilon_with_total_steps(self, total_steps, batch_size, data_size):
+    def test_make_private_with_epsilon_with_total_steps(
+        self, total_steps, batch_size, data_size
+    ):
         # save the original values, as we are going to test
         # different data and batch sizes
         orig_data_size = self.DATA_SIZE
@@ -603,7 +605,7 @@ class BasePrivacyEngineTest(ABC):
             data_loader=dl,
             target_epsilon=target_eps,
             target_delta=1e-5,
-            epochs=None, # epochs must be None if total_steps is set
+            epochs=None,  # epochs must be None if total_steps is set
             max_grad_norm=1.0,
             grad_sample_mode=self.GRAD_SAMPLE_MODE,
             total_steps=total_steps,
@@ -615,7 +617,7 @@ class BasePrivacyEngineTest(ABC):
 
         # we can check from the accounting history if the sample rate
         # is indeed set correctly.
-        for i in range(1, total_steps+1):
+        for i in range(1, total_steps + 1):
             self._train_steps(model, optimizer, poisson_dl, max_steps=1)
 
             history = privacy_engine.accountant.history[0]

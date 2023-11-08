@@ -385,7 +385,9 @@ class PrivacyEngine:
 
         if total_steps:
             if not poisson_sampling:
-                raise ValueError("Setting total_steps without Poisson sampling not implemented")
+                raise ValueError(
+                    "Setting total_steps without Poisson sampling not implemented"
+                )
 
             # if we are stepping through the optimizer for `total_steps` steps,
             # we can just use sample_rate q = B/N
@@ -498,7 +500,9 @@ class PrivacyEngine:
 
         if total_steps:
             if not poisson_sampling:
-                raise ValueError("Setting total_steps without Poisson sampling not implemented")
+                raise ValueError(
+                    "Setting total_steps without Poisson sampling not implemented"
+                )
 
             if epochs is not None:
                 raise ValueError(

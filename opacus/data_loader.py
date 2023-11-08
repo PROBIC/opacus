@@ -205,7 +205,7 @@ class DPDataLoader(DataLoader):
 
         # DataLoader does not know about steps, it's handled by
         # our batch sampler, so let's remove it from kwargs
-        kwargs.pop('total_steps', None)
+        kwargs.pop("total_steps", None)
 
         super().__init__(
             dataset=dataset,
