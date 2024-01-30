@@ -149,6 +149,7 @@ class DPDataLoader(DataLoader):
         drop_last: bool = False,
         generator=None,
         distributed: bool = False,
+        total_steps: int = None,
         **kwargs,
     ):
         """
@@ -170,6 +171,9 @@ class DPDataLoader(DataLoader):
             distributed: set ``True`` if you'll be using DPDataLoader in a DDP environment
                 Selects between ``DistributedUniformWithReplacementSampler`` and
                 ``UniformWithReplacementSampler`` sampler implementations
+            total_steps: Instead of stepping through once the dataloader for once expected epoch,
+            we will step through it `total_steps` times. This will set the sample rate to
+            batch_size/data_size. The parameter total_steps is any positive integer.
         """
 
         self.sample_rate = sample_rate
@@ -180,12 +184,14 @@ class DPDataLoader(DataLoader):
                 total_size=len(dataset),  # type: ignore[assignment, arg-type]
                 sample_rate=sample_rate,
                 generator=generator,
+                steps=total_steps,
             )
         else:
             batch_sampler = UniformWithReplacementSampler(
                 num_samples=len(dataset),  # type: ignore[assignment, arg-type]
                 sample_rate=sample_rate,
                 generator=generator,
+                steps=total_steps,
             )
         sample_empty_shapes = [(0, *shape_safe(x)) for x in dataset[0]]
         dtypes = [dtype_safe(x) for x in dataset[0]]
@@ -196,6 +202,10 @@ class DPDataLoader(DataLoader):
             logger.warning(
                 "Ignoring drop_last as it is not compatible with DPDataLoader."
             )
+
+        # DataLoader does not know about steps, it's handled by
+        # our batch sampler, so let's remove it from kwargs
+        kwargs.pop("total_steps", None)
 
         super().__init__(
             dataset=dataset,
@@ -211,7 +221,12 @@ class DPDataLoader(DataLoader):
 
     @classmethod
     def from_data_loader(
-        cls, data_loader: DataLoader, *, distributed: bool = False, generator=None
+        cls,
+        data_loader: DataLoader,
+        *,
+        distributed: bool = False,
+        generator=None,
+        total_steps: int = None,
     ):
         """
         Creates new ``DPDataLoader`` based on passed ``data_loader`` argument.
@@ -221,6 +236,9 @@ class DPDataLoader(DataLoader):
             distributed: set ``True`` if you'll be using DPDataLoader in a DDP environment
             generator: Random number generator used to sample elements. Defaults to
                 generator from the original data loader.
+            total_steps: Instead of stepping through once the dataloader for once expected epoch,
+            we will step through it `total_steps` times. This will set the sample rate to
+            batch_size/data_size. The parameter total_steps is any positive integer.
 
         Returns:
             New DPDataLoader instance, with all attributes and parameters inherited
@@ -236,9 +254,14 @@ class DPDataLoader(DataLoader):
         if isinstance(data_loader.dataset, IterableDataset):
             raise ValueError("Uniform sampling is not supported for IterableDataset")
 
+        if total_steps:
+            sample_rate = data_loader.batch_size / len(data_loader.dataset)
+        else:
+            sample_rate = 1 / len(data_loader)
+
         return cls(
             dataset=data_loader.dataset,
-            sample_rate=1 / len(data_loader),
+            sample_rate=sample_rate,
             num_workers=data_loader.num_workers,
             collate_fn=data_loader.collate_fn,
             pin_memory=data_loader.pin_memory,
@@ -250,6 +273,7 @@ class DPDataLoader(DataLoader):
             prefetch_factor=data_loader.prefetch_factor,
             persistent_workers=data_loader.persistent_workers,
             distributed=distributed,
+            total_steps=total_steps,
         )
 
 

@@ -109,6 +109,7 @@ class BasePrivacyEngineTest(ABC):
         grad_sample_mode="hooks",
         opt_exclude_frozen=False,
         normalize_clipping=False,
+        total_steps: int = None,
     ):
         model = self._init_model()
         model = PrivacyEngine.get_compatible_module(model)
@@ -141,6 +142,7 @@ class BasePrivacyEngineTest(ABC):
             clipping=clipping,
             grad_sample_mode=grad_sample_mode,
             normalize_clipping=normalize_clipping,
+            total_steps=total_steps,
         )
 
         return model, optimizer, poisson_dl, privacy_engine
@@ -574,6 +576,79 @@ class BasePrivacyEngineTest(ABC):
         self.assertAlmostEqual(
             target_eps, privacy_engine.get_epsilon(target_delta), places=2
         )
+
+    @given(
+        total_steps=st.sampled_from([1, 3, 26]),
+        batch_size=st.sampled_from([25, 49, 50]),
+        data_size=st.sampled_from([50, 51]),
+    )
+    @settings(deadline=None)
+    def test_make_private_with_epsilon_with_total_steps(
+        self, total_steps, batch_size, data_size
+    ):
+        # save the original values, as we are going to test
+        # different data and batch sizes
+        orig_data_size = self.DATA_SIZE
+        orig_batch_size = self.BATCH_SIZE
+
+        self.DATA_SIZE = data_size
+        self.BATCH_SIZE = batch_size
+
+        model, optimizer, dl = self._init_vanilla_training()
+        target_eps = 2.0
+        target_delta = 1e-5
+
+        privacy_engine = PrivacyEngine()
+        model, optimizer, poisson_dl = privacy_engine.make_private_with_epsilon(
+            module=model,
+            optimizer=optimizer,
+            data_loader=dl,
+            target_epsilon=target_eps,
+            target_delta=1e-5,
+            epochs=None,  # epochs must be None if total_steps is set
+            max_grad_norm=1.0,
+            grad_sample_mode=self.GRAD_SAMPLE_MODE,
+            total_steps=total_steps,
+        )
+
+        self.assertEqual(len(poisson_dl), total_steps)
+
+        true_sample_rate = self.BATCH_SIZE / self.DATA_SIZE
+
+        # we can check from the accounting history if the sample rate
+        # is indeed set correctly.
+        for i in range(1, total_steps + 1):
+            self._train_steps(model, optimizer, poisson_dl, max_steps=1)
+
+            history = privacy_engine.accountant.history[0]
+            _, last_sample_rate, num_steps = history
+
+            self.assertEqual(i, num_steps)
+            self.assertEqual(true_sample_rate, last_sample_rate)
+
+        self.assertAlmostEqual(
+            target_eps, privacy_engine.get_epsilon(target_delta), delta=0.01
+        )
+
+        # restore the original values
+        self.DATA_SIZE = orig_data_size
+        self.BATCH_SIZE = orig_batch_size
+
+        # check that error is thrown when both epochs and total_steps are set
+        with self.assertRaisesRegex(
+            ValueError, "EITHER a number of steps or a number of epochs"
+        ):
+            model, optimizer, poisson_dl = privacy_engine.make_private_with_epsilon(
+                module=model,
+                optimizer=optimizer,
+                data_loader=dl,
+                target_epsilon=target_eps,
+                target_delta=1e-5,
+                epochs=1,
+                max_grad_norm=1.0,
+                grad_sample_mode=self.GRAD_SAMPLE_MODE,
+                total_steps=100,
+            )
 
     def test_deterministic_run(self):
         """

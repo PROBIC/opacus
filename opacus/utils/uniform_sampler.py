@@ -39,6 +39,7 @@ class UniformWithReplacementSampler(Sampler[List[int]]):
         self.num_samples = num_samples
         self.sample_rate = sample_rate
         self.generator = generator
+        self.steps = steps
 
         if self.num_samples <= 0:
             raise ValueError(
@@ -113,6 +114,7 @@ class DistributedUniformWithReplacementSampler(Sampler):
         self.epoch = 0
         self.shuffle = shuffle
         self.shuffle_seed = shuffle_seed
+        self.steps = steps
 
         if self.total_size <= 0:
             raise ValueError(
