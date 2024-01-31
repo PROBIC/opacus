@@ -205,6 +205,7 @@ class DPOptimizer(Optimizer):
         generator=None,
         secure_mode: bool = False,
         normalize_clipping: bool = False,
+        record_grad_and_noise: bool = False,
     ):
         """
 
@@ -227,6 +228,9 @@ class DPOptimizer(Optimizer):
                 clipped gradients by 1/C as described in the paper "Unlocking High-Accuracy
                 Differentially Private Image Classification through Scale" by De et al. (2022)
                 - https://arxiv.org/pdf/2204.13650.pdf
+            record_grad_and_noise: If ``True`` records the sum of previous gradient for each
+                parameters in ``_previous_grad`` field. Similarly, record the DP noise in
+                ``_previous_noise`` field.
         """
         if loss_reduction not in ("mean", "sum"):
             raise ValueError(f"Unexpected value for loss_reduction: {loss_reduction}")
@@ -245,6 +249,8 @@ class DPOptimizer(Optimizer):
         self.generator = generator
         self.secure_mode = secure_mode
         self.normalize_clipping = normalize_clipping
+        self.normalize_clipping = normalize_clipping
+        self.record_grad_and_noise = record_grad_and_noise
 
         self.param_groups = self.original_optimizer.param_groups
         self.defaults = self.original_optimizer.defaults
@@ -254,6 +260,10 @@ class DPOptimizer(Optimizer):
 
         for p in self.params:
             p.summed_grad = None
+
+        if self.record_grad_and_noise:
+            self._previous_grad = None
+            self._previous_noise = None
 
     def _get_flat_grad_sample(self, p: torch.Tensor):
         """
@@ -432,9 +442,13 @@ class DPOptimizer(Optimizer):
         Adds noise to clipped gradients. Stores clipped and noised result in ``p.grad``
         """
 
+        if self.record_grad_and_noise:
+            self._previous_grad = torch.zeros(len(self.params))
+            self._previous_noise = torch.zeros(len(self.params))
+
         max_grad_norm = 1 if self.normalize_clipping else self.max_grad_norm
 
-        for p in self.params:
+        for i, p in enumerate(self.params):
             _check_processed_flag(p.summed_grad)
 
             noise = _generate_noise(
@@ -443,6 +457,11 @@ class DPOptimizer(Optimizer):
                 generator=self.generator,
                 secure_mode=self.secure_mode,
             )
+
+            if self.record_grad_and_noise:
+                self._previous_grad[i] = p.summed_grad.mean()
+                self._previous_noise[i] = noise.mean()
+
             p.grad = (p.summed_grad + noise).view_as(p)
 
             _mark_as_processed(p.summed_grad)

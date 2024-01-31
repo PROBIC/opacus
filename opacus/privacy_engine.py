@@ -61,7 +61,13 @@ class PrivacyEngine:
         >>> # continue training as normal
     """
 
-    def __init__(self, *, accountant: str = "prv", secure_mode: bool = False):
+    def __init__(
+        self,
+        *,
+        accountant: str = "prv",
+        secure_mode: bool = False,
+        record_grad_and_noise: bool = False,
+    ):
         """
 
         Args:
@@ -75,11 +81,16 @@ class PrivacyEngine:
                 prevents certain floating-point arithmetic-based attacks.
                 See :meth:`~opacus.optimizers.optimizer._generate_noise` for details.
                 When set to ``True`` requires ``torchcsprng`` to be installed
+            record_grad_and_noise: If ``True`` sets the optimizer to record the mean of
+                previous gradient for each parameters in ``_previous_grad`` field.
+                Similarly, record the DP noise in ``_previous_noise`` field.
         """
         self.accountant = create_accountant(mechanism=accountant)
         self.secure_mode = secure_mode
         self.secure_rng = None
         self.dataset = None  # only used to detect switching to a different dataset
+        self.record_grad_and_noise = record_grad_and_noise
+
         if self.secure_mode:
             try:
                 import torchcsprng as csprng
@@ -136,6 +147,7 @@ class PrivacyEngine:
             generator=generator,
             secure_mode=self.secure_mode,
             normalize_clipping=normalize_clipping,
+            record_grad_and_noise=self.record_grad_and_noise,
         )
 
     def _prepare_data_loader(
