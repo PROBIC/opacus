@@ -441,10 +441,9 @@ class DPOptimizer(Optimizer):
         """
         Adds noise to clipped gradients. Stores clipped and noised result in ``p.grad``
         """
-
         if self.record_grad_and_noise:
-            self._previous_grad = torch.zeros(len(self.params))
-            self._previous_noise = torch.zeros(len(self.params))
+            all_gradients = []
+            all_noises = []
 
         max_grad_norm = 1 if self.normalize_clipping else self.max_grad_norm
 
@@ -459,12 +458,16 @@ class DPOptimizer(Optimizer):
             )
 
             if self.record_grad_and_noise:
-                self._previous_grad[i] = p.summed_grad.mean()
-                self._previous_noise[i] = noise.mean()
+                all_gradients.append(p.summed_grad.view(-1))
+                all_noises.append(noise.view(-1))
 
             p.grad = (p.summed_grad + noise).view_as(p)
 
             _mark_as_processed(p.summed_grad)
+
+        if self.record_grad_and_noise:
+            self._previous_grad = torch.cat(all_gradients)
+            self._previous_noise = torch.cat(all_noises)
 
     def scale_grad(self):
         """
