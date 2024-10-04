@@ -139,6 +139,7 @@ class PrivacyEngine:
             generator=generator,
             secure_mode=self.secure_mode,
             normalize_clipping=normalize_clipping,
+            optim_args=optim_args,
             **kwargs,
         )
 
