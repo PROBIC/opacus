@@ -43,16 +43,13 @@ class AdaClipDPOptimizer(DPOptimizer):
         optimizer: Optimizer,
         *,
         noise_multiplier: float,
-        target_unclipped_quantile: float,
-        clipbound_learning_rate: float,
-        max_clipbound: float,
-        min_clipbound: float,
-        unclipped_num_std: float,
         max_grad_norm: float,
         expected_batch_size: Optional[int],
         loss_reduction: str = "mean",
         generator=None,
         secure_mode: bool = False,
+        normalize_clipping: bool = False,
+        optim_args: dict = None,
     ):
         super().__init__(
             optimizer,
@@ -62,7 +59,13 @@ class AdaClipDPOptimizer(DPOptimizer):
             loss_reduction=loss_reduction,
             generator=generator,
             secure_mode=secure_mode,
+            normalize_clipping=normalize_clipping,
         )
+        target_unclipped_quantile = optim_args.get('target_unclipped_quantile', 0.0)
+        clipbound_learning_rate = optim_args.get('clipbound_learning_rate', 1.0)
+        max_clipbound = optim_args.get('max_clipbound', torch.inf)
+        min_clipbound = optim_args.get('min_clipbound', -torch.inf)
+        unclipped_num_std = optim_args.get('unclipped_num_std')
         assert (
             max_clipbound > min_clipbound
         ), "max_clipbound must be larger than min_clipbound."
