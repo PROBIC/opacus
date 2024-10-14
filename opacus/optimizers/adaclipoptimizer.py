@@ -60,9 +60,11 @@ class AdaClipDPOptimizer(DPOptimizer):
             generator=generator,
             secure_mode=secure_mode,
             normalize_clipping=normalize_clipping,
+            optim_args=optim_args,
         )
         target_unclipped_quantile = optim_args.get('target_unclipped_quantile', 0.0)
         clipbound_learning_rate = optim_args.get('clipbound_learning_rate', 1.0)
+        count_threshold = optim_args.get('count_threshold', 1.0)
         max_clipbound = optim_args.get('max_clipbound', torch.inf)
         min_clipbound = optim_args.get('min_clipbound', -torch.inf)
         unclipped_num_std = optim_args.get('unclipped_num_std')
@@ -71,6 +73,7 @@ class AdaClipDPOptimizer(DPOptimizer):
         ), "max_clipbound must be larger than min_clipbound."
         self.target_unclipped_quantile = target_unclipped_quantile
         self.clipbound_learning_rate = clipbound_learning_rate
+        self.count_threshold = count_threshold
         self.max_clipbound = max_clipbound
         self.min_clipbound = min_clipbound
         self.unclipped_num_std = unclipped_num_std
@@ -103,7 +106,7 @@ class AdaClipDPOptimizer(DPOptimizer):
         # relative to the parent DPOptimizer class.
         self.sample_size += len(per_sample_clip_factor)
         self.unclipped_num += (
-            len(per_sample_clip_factor) - (per_sample_clip_factor < 1).sum()
+            len(per_sample_norms) - (per_sample_norms < self.max_grad_norm * self.count_threshold).sum()
         )
 
         for p in self.params:

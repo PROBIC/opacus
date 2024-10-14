@@ -206,6 +206,7 @@ class DPOptimizer(Optimizer):
         generator=None,
         secure_mode: bool = False,
         normalize_clipping: bool = False,
+        optim_args: dict = None,
     ):
         """
 
