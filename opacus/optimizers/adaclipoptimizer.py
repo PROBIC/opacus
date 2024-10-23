@@ -51,6 +51,10 @@ class AdaClipDPOptimizer(DPOptimizer):
         normalize_clipping: bool = False,
         optim_args: dict = None,
     ):
+
+        assert(normalize_clipping == True), "Let us focus on the normalized version first"
+        max_grad_norm = 1.0
+
         super().__init__(
             optimizer,
             noise_multiplier=noise_multiplier,
@@ -62,15 +66,15 @@ class AdaClipDPOptimizer(DPOptimizer):
             normalize_clipping=normalize_clipping,
             optim_args=optim_args,
         )
+
         target_unclipped_quantile = optim_args.get('target_unclipped_quantile', 0.0)
         clipbound_learning_rate = optim_args.get('clipbound_learning_rate', 1.0)
         count_threshold = optim_args.get('count_threshold', 1.0)
         max_clipbound = optim_args.get('max_clipbound', torch.inf)
         min_clipbound = optim_args.get('min_clipbound', -torch.inf)
         unclipped_num_std = optim_args.get('unclipped_num_std')
-        assert (
-            max_clipbound > min_clipbound
-        ), "max_clipbound must be larger than min_clipbound."
+        assert (max_clipbound > min_clipbound), "max_clipbound must be larger than min_clipbound."
+        self.clipbound = max_grad_norm # let we set the init value of clip bound to 1
         self.target_unclipped_quantile = target_unclipped_quantile
         self.clipbound_learning_rate = clipbound_learning_rate
         self.count_threshold = count_threshold
@@ -98,15 +102,26 @@ class AdaClipDPOptimizer(DPOptimizer):
             g.view(len(g), -1).norm(2, dim=-1) for g in self.grad_samples
         ]
         per_sample_norms = torch.stack(per_param_norms, dim=1).norm(2, dim=1)
-        per_sample_clip_factor = (self.max_grad_norm / (per_sample_norms + 1e-6)).clamp(
-            max=1.0
-        )
+
+        #print(f"max per_param_norms before clipping: {per_sample_norms.max().item()}")
+
+        # Create a mask to determine which gradients need to be clipped based on the clipbound
+        clip_mask = per_sample_norms > self.clipbound
+        per_sample_clip_factor = torch.where(
+            clip_mask,
+            self.max_grad_norm / (per_sample_norms + 1e-6),
+            torch.tensor(self.max_grad_norm / self.clipbound, device=per_sample_norms.device)
+        ).clamp(max=1.0)
+
+        # Print max per_param_norms after clipping
+        clipped_per_sample_norms = per_sample_norms * per_sample_clip_factor
+        #print(f"max per_param_norms after clipping: {clipped_per_sample_norms.max().item()}")
 
         # the two lines below are the only changes
         # relative to the parent DPOptimizer class.
         self.sample_size += len(per_sample_clip_factor)
         self.unclipped_num += (
-            len(per_sample_norms) - (per_sample_norms < self.max_grad_norm * self.count_threshold).sum()
+            len(per_sample_norms) - (per_sample_norms < self.clipbound * self.count_threshold).sum()
         )
 
         for p in self.params:
@@ -133,24 +148,26 @@ class AdaClipDPOptimizer(DPOptimizer):
         self.unclipped_num = float(self.unclipped_num)
         self.unclipped_num += unclipped_num_noise
 
-    def update_max_grad_norm(self):
+    def update_clipbound(self):
         """
         Update clipping bound based on unclipped fraction
         """
         unclipped_frac = self.unclipped_num / self.sample_size
-        self.max_grad_norm *= torch.exp(
+        self.clipbound *= torch.exp(
             -self.clipbound_learning_rate
             * (unclipped_frac - self.target_unclipped_quantile)
         )
-        if self.max_grad_norm > self.max_clipbound:
-            self.max_grad_norm = self.max_clipbound
-        elif self.max_grad_norm < self.min_clipbound:
-            self.max_grad_norm = self.min_clipbound
+        if self.clipbound > self.max_clipbound:
+            self.clipbound = self.max_clipbound
+        elif self.clipbound < self.min_clipbound:
+            self.clipbound = self.min_clipbound
+
+        #print(f"self.clipbound: {self.clipbound}")
 
     def pre_step(
         self, closure: Optional[Callable[[], float]] = None
     ) -> Optional[float]:
         pre_step_full = super().pre_step()
         if pre_step_full:
-            self.update_max_grad_norm()
+            self.update_clipbound()
         return pre_step_full
