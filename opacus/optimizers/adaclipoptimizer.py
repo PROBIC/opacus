@@ -106,12 +106,10 @@ class AdaClipDPOptimizer(DPOptimizer):
         #print(f"max per_param_norms before clipping: {per_sample_norms.max().item()}")
 
         # Create a mask to determine which gradients need to be clipped based on the clipbound
-        clip_mask = per_sample_norms > self.clipbound
-        per_sample_clip_factor = torch.where(
-            clip_mask,
+        per_sample_clip_factor = torch.minimum(
             self.max_grad_norm / (per_sample_norms + 1e-6),
-            torch.tensor(self.max_grad_norm / self.clipbound, device=per_sample_norms.device)
-        ).clamp(max=1.0)
+            torch.full_like(per_sample_norms, self.max_grad_norm / self.clipbound),
+        )
 
         # Print max per_param_norms after clipping
         clipped_per_sample_norms = per_sample_norms * per_sample_clip_factor
