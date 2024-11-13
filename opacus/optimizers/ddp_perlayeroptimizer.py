@@ -110,7 +110,7 @@ class DistributedPerLayerOptimizer(DPOptimizer):
         The reason why we need self is because of generator for secure_mode
         """
 
-        max_grad_norm = 1 if self.normalize_cliping else self.max_grad_norm
+        max_grad_norm = 1 if self.normalize_clipping else self.max_grad_norm
 
         noise = _generate_noise(
             std=self.noise_multiplier * max_grad_norm,
