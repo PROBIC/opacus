@@ -111,16 +111,10 @@ class AdaClipDPOptimizer(DPOptimizer):
             torch.full_like(per_sample_norms, self.max_grad_norm / self.clipbound),
         )
 
-        # Print max per_param_norms after clipping
-        clipped_per_sample_norms = per_sample_norms * per_sample_clip_factor
-        #print(f"max per_param_norms after clipping: {clipped_per_sample_norms.max().item()}")
-
         # the two lines below are the only changes
         # relative to the parent DPOptimizer class.
         self.sample_size += len(per_sample_clip_factor)
-        self.unclipped_num += (
-            len(per_sample_norms) - (per_sample_norms < self.clipbound * self.count_threshold).sum()
-        )
+        self.unclipped_num +=  (per_sample_norms < self.clipbound * self.count_threshold).sum()
 
         for p in self.params:
             _check_processed_flag(p.grad_sample)
@@ -160,7 +154,7 @@ class AdaClipDPOptimizer(DPOptimizer):
         elif self.clipbound < self.min_clipbound:
             self.clipbound = self.min_clipbound
 
-        #print(f"self.clipbound: {self.clipbound}")
+        #print(f"!!! self.clipbound: {self.clipbound}")
 
     def pre_step(
         self, closure: Optional[Callable[[], float]] = None
