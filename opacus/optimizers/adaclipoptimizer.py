@@ -73,8 +73,9 @@ class AdaClipDPOptimizer(DPOptimizer):
         max_clipbound = optim_args.get('max_clipbound', torch.inf)
         min_clipbound = optim_args.get('min_clipbound', -torch.inf)
         unclipped_num_std = optim_args.get('unclipped_num_std')
+        clip_bound_init = optim_args.get('clip_bound_init', 1.0)
         assert (max_clipbound > min_clipbound), "max_clipbound must be larger than min_clipbound."
-        self.clipbound = max_grad_norm # let we set the init value of clip bound to 1
+        self.clipbound = clip_bound_init
         self.target_unclipped_quantile = target_unclipped_quantile
         self.clipbound_learning_rate = clipbound_learning_rate
         self.count_threshold = count_threshold
